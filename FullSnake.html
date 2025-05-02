@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>貪食蛇遊戲</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        background-color: #f0f0f0;
+      }
+      canvas {
+        border: 1px solid #000;
+      }
+      #refreshButton {
+        margin-bottom: 10px;
+        padding: 8px 16px;
+        font-size: 16px;
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background-color 0.3s;
+      }
+      #refreshButton:hover {
+        background-color: #45a049;
+      }
+    </style>
+  </head>
+  <body>
+    <button id="refreshButton">重新整理</button>
+    <canvas id="gameCanvas" width="400" height="400"></canvas>
+
+    <script>
+      // 重新整理按鈕功能
+      document
+        .getElementById("refreshButton")
+        .addEventListener("click", function () {
+          location.reload();
+        });
+
+      // 遊戲常數
+      const CANVAS_WIDTH = 400;
+      const CANVAS_HEIGHT = 400;
+      const SIZE = 20;
+      const DELAY = 150; // 毫秒
+
+      // 獲取Canvas和Context
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+
+      // 遊戲變數
+      let snake = [];
+      let vx = SIZE;
+      let vy = 0;
+      let goal;
+      let points = 0;
+      let pointsText;
+      let delaytime = DELAY;
+      let lastKey = "";
+      let gameRunning = true;
+
+      // Canvas輔助類 (模擬Python版本的Canvas類)
+      class CanvasHelper {
+        constructor(canvas, ctx) {
+          this.canvas = canvas;
+          this.ctx = ctx;
+          this.objects = {};
+          this.nextId = 0;
+          this.lastKeyPress = null;
+
+          // 設置鍵盤事件監聽
+          document.addEventListener("keydown", (e) => {
+            this.lastKeyPress = e.key;
+          });
+        }
+
+        // 清除畫布
+        clear() {
+          this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+          this.objects = {};
+          this.nextId = 0;
+        }
+
+        // 創建矩形
+        create_rectangle(x1, y1, x2, y2, color) {
+          const id = this.nextId++;
+          this.objects[id] = {
+            type: "rectangle",
+            x: x1,
+            y: y1,
+            width: x2 - x1,
+            height: y2 - y1,
+            color: color,
+            outlineColor: null,
+          };
+          this._draw_object(id);
+          return id;
+        }
+
+        // 創建文本
+        create_text(x, y, font, font_size, text, color) {
+          const id = this.nextId++;
+          this.objects[id] = {
+            type: "text",
+            x: x,
+            y: y,
+            font: font,
+            font_size: font_size,
+            text: text,
+            color: color,
+          };
+          this._draw_object(id);
+          return id;
+        }
+
+        // 設置輪廓顏色
+        set_outline_color(id, color) {
+          if (this.objects[id]) {
+            this.objects[id].outlineColor = color;
+            this._draw_object(id);
+          }
+        }
+
+        // 移動物件
+        move(id, dx, dy) {
+          const obj = this.objects[id];
+          if (!obj) return;
+
+          if (obj.type === "rectangle") {
+            obj.x += dx;
+            obj.y += dy;
+          }
+          this._redraw_all();
+        }
+
+        // 刪除物件
+        delete(id) {
+          if (this.objects[id]) {
+            delete this.objects[id];
+            this._redraw_all();
+          }
+        }
+
+        // 移動物件到特定位置
+        moveto(id, x, y) {
+          const obj = this.objects[id];
+          if (!obj) return;
+
+          if (obj.type === "rectangle") {
+            obj.x = x;
+            obj.y = y;
+            this._redraw_all();
+          }
+        }
+
+        // 獲取物件左上角X座標
+        get_left_x(id) {
+          const obj = this.objects[id];
+          if (!obj) return 0;
+          return obj.x;
+        }
+
+        // 獲取物件左上角Y座標
+        get_top_y(id) {
+          const obj = this.objects[id];
+          if (!obj) return 0;
+          return obj.y;
+        }
+
+        // 獲取最後一個按鍵
+        get_last_key_press() {
+          const key = this.lastKeyPress;
+          this.lastKeyPress = null;
+          return key;
+        }
+
+        // 查找重疊的物件
+        find_overlapping(x1, y1, x2, y2) {
+          const overlappingIds = [];
+          for (const id in this.objects) {
+            const obj = this.objects[id];
+            if (obj.type === "rectangle") {
+              if (
+                !(
+                  obj.x + obj.width < x1 ||
+                  obj.x > x2 ||
+                  obj.y + obj.height < y1 ||
+                  obj.y > y2
+                )
+              ) {
+                overlappingIds.push(Number(id));
+              }
+            }
+          }
+          return overlappingIds;
+        }
+
+        // 繪製特定物件
+        _draw_object(id) {
+          const obj = this.objects[id];
+          if (!obj) return;
+
+          if (obj.type === "rectangle") {
+            this.ctx.fillStyle = obj.color;
+            this.ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
+
+            if (obj.outlineColor) {
+              this.ctx.strokeStyle = obj.outlineColor;
+              this.ctx.lineWidth = 2;
+              this.ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
+            }
+          } else if (obj.type === "text") {
+            this.ctx.font = `${obj.font_size}px ${obj.font}`;
+            this.ctx.fillStyle = obj.color;
+            this.ctx.fillText(obj.text, obj.x, obj.y + obj.font_size);
+          }
+        }
+
+        // 重繪所有物件
+        _redraw_all() {
+          this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+          for (const id in this.objects) {
+            this._draw_object(id);
+          }
+        }
+      }
+
+      // 建立Canvas輔助物件
+      const canvasHelper = new CanvasHelper(canvas, ctx);
+
+      // 創建蛇
+      function create_snake() {
+        const snake = [];
+        const rect = canvasHelper.create_rectangle(0, 0, SIZE, SIZE, "blue");
+        canvasHelper.set_outline_color(rect, "red");
+        snake.push(rect);
+        return snake;
+      }
+
+      // 移動蛇
+      function move_snake(snake, vx, vy) {
+        const head = snake[0];
+        const x = canvasHelper.get_left_x(head);
+        const y = canvasHelper.get_top_y(head);
+        const listColor = [
+          "red",
+          "blue",
+          "green",
+          "white",
+          "pink",
+          "yellow",
+          "fuchsia",
+          "lime",
+          "gold",
+        ];
+
+        const newHead = canvasHelper.create_rectangle(
+          x + vx,
+          y + vy,
+          x + vx + SIZE,
+          y + vy + SIZE,
+          listColor[Math.floor(Math.random() * listColor.length)]
+        );
+
+        canvasHelper.set_outline_color(newHead, "red");
+        snake.unshift(newHead);
+        canvasHelper.delete(snake[snake.length - 1]);
+        snake.pop();
+      }
+
+      // 檢查與牆壁的碰撞
+      function collisions_Wall(head) {
+        const rectLx = canvasHelper.get_left_x(head);
+        const rectTy = canvasHelper.get_top_y(head);
+        const rectRx = rectLx + SIZE;
+        const rectBy = rectTy + SIZE;
+
+        if (
+          rectLx < 0 ||
+          rectLx >= CANVAS_WIDTH ||
+          rectTy >= CANVAS_HEIGHT ||
+          rectTy < 0
+        ) {
+          return true;
+        }
+        return false;
+      }
+
+      // 檢查蛇自身碰撞 - 修復版本
+      function check_collision_self(snake) {
+        if (snake.length <= 1) return false;
+
+        const headLx = canvasHelper.get_left_x(snake[0]);
+        const headTy = canvasHelper.get_top_y(snake[0]);
+
+        // 只檢查蛇身（從第2個部分開始），而不是所有重疊物件
+        for (let i = 1; i < snake.length; i++) {
+          const bodyLx = canvasHelper.get_left_x(snake[i]);
+          const bodyTy = canvasHelper.get_top_y(snake[i]);
+
+          if (headLx === bodyLx && headTy === bodyTy) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      // 處理與食物的碰撞
+      function collisions_Goal(snake, goal) {
+        // 延長蛇身
+        function extend_snake(snake) {
+          const tail = snake[snake.length - 1];
+          const tailLx = canvasHelper.get_left_x(tail);
+          const tailTy = canvasHelper.get_top_y(tail);
+          const newPart = canvasHelper.create_rectangle(
+            tailLx,
+            tailTy,
+            tailLx + SIZE,
+            tailTy + SIZE,
+            "blue"
+          );
+          canvasHelper.set_outline_color(newPart, "red");
+          snake.push(newPart);
+          return snake;
+        }
+
+        const rectLx = canvasHelper.get_left_x(snake[0]);
+        const rectTy = canvasHelper.get_top_y(snake[0]);
+
+        const goalLx = canvasHelper.get_left_x(goal);
+        const goalTy = canvasHelper.get_top_y(goal);
+
+        // 修改碰撞檢測邏輯，使用更精確的碰撞檢測而不是嚴格的相等
+        if (rectLx === goalLx && rectTy === goalTy) {
+          canvasHelper.delete(goal);
+
+          // 找到一個不與蛇身重疊的位置放置新食物
+          let a, b;
+          let snakeLxTy = [];
+          let validPosition = false;
+
+          while (!validPosition) {
+            a = Math.floor(Math.random() * (CANVAS_WIDTH / SIZE)) * SIZE;
+            b = Math.floor(Math.random() * (CANVAS_HEIGHT / SIZE)) * SIZE;
+
+            snakeLxTy = [];
+            for (const part of snake) {
+              snakeLxTy.push([
+                canvasHelper.get_left_x(part),
+                canvasHelper.get_top_y(part),
+              ]);
+            }
+
+            validPosition = true;
+            for (const pos of snakeLxTy) {
+              if (pos[0] === a && pos[1] === b) {
+                validPosition = false;
+                break;
+              }
+            }
+          }
+
+          const newGoal = canvasHelper.create_rectangle(
+            a,
+            b,
+            a + SIZE,
+            b + SIZE,
+            "red"
+          );
+          delaytime *= 0.97;
+          snake = extend_snake(snake);
+          points += 1;
+
+          canvasHelper.delete(pointsText);
+          pointsText = canvasHelper.create_text(
+            0,
+            0,
+            "Arial",
+            28,
+            "分數:" + points,
+            "white"
+          );
+
+          return [newGoal, snake];
+        }
+
+        return [goal, snake];
+      }
+
+      // 處理按鍵輸入
+      function GetKey(key, snake, currentVx, currentVy) {
+        if (snake.length < 2) {
+          // 如果蛇長度為1，可以任意方向移動
+          if (key === "ArrowLeft") {
+            return [-Math.abs(currentVx + currentVy), 0];
+          } else if (key === "ArrowRight") {
+            return [Math.abs(currentVx + currentVy), 0];
+          } else if (key === "ArrowUp") {
+            return [0, -Math.abs(currentVx + currentVy)];
+          } else if (key === "ArrowDown") {
+            return [0, Math.abs(currentVx + currentVy)];
+          }
+        } else {
+          // 如果蛇長度>1，不能直接掉頭
+          if (key === "ArrowLeft" && currentVx <= 0) {
+            return [-Math.abs(currentVx + currentVy), 0];
+          } else if (key === "ArrowRight" && currentVx >= 0) {
+            return [Math.abs(currentVx + currentVy), 0];
+          } else if (key === "ArrowUp" && currentVy <= 0) {
+            return [0, -Math.abs(currentVx + currentVy)];
+          } else if (key === "ArrowDown" && currentVy >= 0) {
+            return [0, Math.abs(currentVx + currentVy)];
+          }
+        }
+
+        // 如果沒有有效的按鍵輸入，保持當前方向
+        return [currentVx, currentVy];
+      }
+
+      // 主遊戲循環
+      function gameLoop() {
+        if (!gameRunning) return;
+
+        move_snake(snake, vx, vy);
+
+        const key = canvasHelper.get_last_key_press();
+        if (key) {
+          [vx, vy] = GetKey(key, snake, vx, vy);
+        }
+
+        if (collisions_Wall(snake[0]) || check_collision_self(snake)) {
+          gameOver();
+          return;
+        }
+
+        [goal, snake] = collisions_Goal(snake, goal);
+
+        setTimeout(gameLoop, delaytime);
+      }
+
+      // 遊戲結束
+      function gameOver() {
+        gameRunning = false;
+        canvasHelper.clear();
+        canvasHelper.create_text(
+          CANVAS_WIDTH / 8,
+          CANVAS_HEIGHT / 4,
+          "Arial",
+          200,
+          "GG",
+          "black"
+        );
+      }
+
+      // 初始化遊戲
+      function initGame() {
+        // 創建背景
+        canvasHelper.create_rectangle(
+          0,
+          0,
+          CANVAS_WIDTH,
+          CANVAS_HEIGHT,
+          "black"
+        );
+
+        // 創建分數顯示
+        pointsText = canvasHelper.create_text(
+          0,
+          0,
+          "Arial",
+          28,
+          "分數:" + points,
+          "white"
+        );
+
+        // 創建蛇
+        snake = create_snake();
+
+        // 創建目標食物
+        goal = canvasHelper.create_rectangle(360, 360, 380, 380, "red");
+
+        // 設置初始方向和速度
+        vx = SIZE;
+        vy = 0;
+
+        // 重置遊戲狀態
+        gameRunning = true;
+        delaytime = DELAY;
+        points = 0;
+
+        // 開始遊戲循環
+        gameLoop();
+      }
+
+      // 當網頁載入完成時開始遊戲
+      window.onload = initGame;
+    </script>
+  </body>
+</html>
